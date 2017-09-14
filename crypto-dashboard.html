@@ -1,0 +1,16 @@
+<link rel="import" href="bower_components/polymer/polymer-element.html">
+
+<dom-module id="crypto-dashboard">
+    <template>
+        <h2>Test Custom Module</h2>
+    </template>
+    <script>
+        class CryptoDashboard extends Polymer.Element {
+            static get is() {
+                return 'crypto-dashboard';
+            }
+        }
+
+        window.customElements.define(CryptoDashboard.is, CryptoDashboard);
+    </script>
+</dom-module>
