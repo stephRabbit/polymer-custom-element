@@ -1,16 +1,259 @@
 <link rel="import" href="bower_components/polymer/polymer-element.html">
+<link rel="import" href="bower_components/iron-ajax/iron-ajax.html">
+<link rel="import" href="bower_components/paper-spinner/paper-spinner-lite.html">
+<link rel="import" href="bower_components/paper-button/paper-button.html">
+<link rel="import" href="bower_components/paper-styles/typography.html">
+<link rel="import" href="bower_components/iron-flex-layout/iron-flex-layout.html">
+<link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
+
+<script src="bower_components/chart.js/dist/Chart.js"></script>
+<script src="bower_components/moment/min/moment.min.js"></script>
 
 <dom-module id="crypto-dashboard">
     <template>
-        <h2>Test Custom Module</h2>
+        <style>
+          :host {
+            display: block;
+            font-family: 'Roboto';
+
+            --paper-cryptocurrency-primary-text-color: #0667D0;
+          }
+
+          h2 {
+            color: #0667D0;
+            @apply --layout-horizontal;
+            @apply --layout-center-center;
+          }
+
+          a {
+            color: #0667D0;
+            text-decoration: none;
+          }
+
+          .content {
+            margin-bottom: 20px;
+            padding: 0 16px;
+            @apply --layout-horizontal;
+            @apply --layout-center-center;
+          }
+
+          .header {
+            @apply --layout-horizontal;
+            @apply --layout-center;
+          }
+
+          .currency {
+            /*@apply --paper-font-headline;*/
+            @apply --paper-font-common-nowrap;
+            color: var(--paper-cryptocurrency-primary-text-color);
+            font-weight: 300;
+          }
+
+          paper-spinner-lite {
+            /*@apply --layout-fit;*/
+            display: none;
+            margin: auto;
+            z-index: 2;
+            height: 70px;
+            width: 70px;
+            --paper-spinner-color: var(--paper-cryptocurrency-spinner-color, #2196F3);
+            --paper-spinner-stroke-width: var(--paper-cryptocurrency-spinner-width, 5px);
+            @apply --paper-cryptocurrency-spinner;
+          }
+
+          paper-spinner-lite[active] {
+            display: block;
+          }
+
+          #chart-block {
+            margin: 0 auto;
+            width: 100%;
+            max-width: 700px;
+          }
+        </style>
+
+        <iron-ajax
+          id="coinbase"
+          handle-as="json"
+          on-response="_handleResponse"
+          loading="{{loading}}">
+        </iron-ajax>
+
+        <h2>CryptoCurrency Price</h2>
+
+        <paper-spinner-lite active="[[loading]]"></paper-spinner-lite>
+
+        <div hidden$="[[loading]]">
+            <div class="content">
+                <div class="header">
+                    <template is="dom-repeat" items="[[currencies]]">
+                        <div class="currency">
+                            <paper-button
+                              noink
+                              on-click="_getCurrencyHistoricData"
+                              data-item$="[[item.code]]">
+                                [[item.name]] - $[[item.price]]
+                            </paper-button>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <div id="chart-block" hidden$="[[loading]]">
+            <canvas
+              height="2"
+              width="4"
+              id="canvas">
+            </canvas>
+        </div>
+
     </template>
+
     <script>
         class CryptoDashboard extends Polymer.Element {
-            static get is() {
-                return 'crypto-dashboard';
+            static get is() { return 'crypto-dashboard' }
+
+            static get properties() {
+                return {
+                    currencies: {
+                        type: Array,
+                        value: [
+                            {
+                                code: 'BTC',
+                                name: 'Bitcoin',
+                                price: 0
+                            },
+                            {
+                                code: 'ETH',
+                                name: 'Ethereum',
+                                price: 0
+                            },
+                            {
+                                code: 'LTC',
+                                name: 'Litecoin',
+                                price: 0
+                            }
+                        ]
+                    },
+                    loading: {
+                        type: Boolean,
+                        notify: true,
+                        value: false
+                    },
+                    lineChart: {}
+                }
+            }
+
+            ready() {
+                super.ready();
+                Polymer.RenderStatus.afterNextRender(this, () => {
+                    this._getCurrencyData();
+                    this._getCurrencyHistoricData(this.currencies[0].code);
+                });
+            }
+
+            _getCurrencyData() {
+                let ajax = this.$.coinbase;
+                let currencies = this.currencies;
+
+                currencies.forEach(element => {
+                    ajax.url = `https://api.coinbase.com/v2/prices/${element.code}-USD/spot`;
+                    ajax.generateRequest();
+                });
+            }
+
+            _getCurrencyHistoricData(currency) {
+                if (event !== undefined) {
+                    currency = event.target.dataset.item;
+                }
+
+                let ajax = this.$.coinbase;
+                ajax.url = `https://api.coinbase.com/v2/prices/${currency}-USD/historic?period=week`;
+                ajax.generateRequest();
+            }
+
+            _handleResponse(response) {
+                if (response.detail.response.data.amount != null) {
+                    this._computeCurrencyPrice(response.detail);
+                }
+                else {
+                    this._computeGraph(response.detail);
+                }
+            }
+
+            _computeCurrencyPrice(data) {
+                let code = data.url.substring(35, 38);
+                let index = this.currencies.map(e => e.code).indexOf(code);
+
+                this.set(`currencies.${index}.price`, data.response.data.amount);
+            }
+
+            _computeGraph(data) {
+                let code = data.url.substring(35, 38);
+                let label = [];
+                let price = [];
+
+                data.response.data.prices.forEach(element => {
+                    label.push(this._computeDateTime(element.time));
+                    price.push(element.price);
+                });
+
+                this._generateLineChart(label, price, code);
+            }
+
+            _computeDateTime(datestring) {
+                if (datestring) {
+                    return moment(datestring, "YYYY-MM-DDThh:mm:aaZ").format('M/DD/YYYY h:mm a');
+                }
+                return datestring;
+            }
+
+            _generateLineChart(label, price, labelName) {
+                if (this.lineChart !== undefined) this.lineChart.destroy();
+                let ctx = this.$.canvas.getContext('2d');
+
+                this.lineChart = new Chart(ctx, {
+                    type: 'line',
+
+                    data: {
+                        labels: label.reverse(),
+                        datasets: [
+                            {
+                                pointRadius: 0,
+                                label: labelName,
+                                backgroundColor: "rgba(111, 124, 186, 0.1)",
+                                borderColor: "rgba(111, 124, 186, 1)",
+                                borderWidth: 2,
+                                data: price.reverse()
+                            }
+                        ]
+                    },
+
+                    options: {
+                        animation: false,
+                        tooltips: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        scales: {
+                            xAxes: [{
+                                gridLines: {
+                                    display: true
+                                }
+                            }],
+                            yAxes: [{
+                                gridLines: {
+                                    display: true
+                                }
+                            }]
+                        }
+                    }
+                });
             }
         }
 
         window.customElements.define(CryptoDashboard.is, CryptoDashboard);
     </script>
+
 </dom-module>
